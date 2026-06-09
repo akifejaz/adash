@@ -1,37 +1,68 @@
-# adash — Atesor AI Package Dashboard
+# adash - Atesor AI Package Dashboard
 
-A small, fully self-contained web dashboard that lets anyone browse and
-download every package that **Atesor AI** has built for `riscv64`.
+A small web dashboard for browsing and downloading every package that
+**Atesor AI** has built for `riscv64`.
 
-* **Source of truth:** GitHub Releases on
-  [`akifejaz/atesor`](https://github.com/akifejaz/atesor/releases). Each
-  monthly release is tagged `builds-YYYY-MM` and ships every successful
-  build as a `<package>-<YYYYMMDD>-<HHMMSS>-<distro>.zip` asset.
-* **Zero coupling to atesor-ai source:** the dashboard does not import
-  anything from the agent codebase and does not read from any local
-  workspace. Everything — package metadata, the porting recipe and the
-  build/agent logs — is fetched from GitHub on demand.
-* **Lightweight:** FastAPI server + a single static page (vanilla JS, no
-  framework, no build step). Only two runtime dependencies:
-  `fastapi` and `uvicorn`.
+It can run two ways:
+
+- **Hosted on GitHub Pages** as a fully static site. A GitHub Actions
+  workflow regenerates the manifest on a schedule, and the page reads
+  recipes and logs straight out of each release zip in your browser
+  using HTTP range requests. No server to run.
+- **As a local FastAPI app** for development. Same UI, but the manifest
+  and zip reads happen on the Python side.
+
+The source of truth in both cases is GitHub Releases on
+[`akifejaz/atesor`](https://github.com/akifejaz/atesor/releases). Each
+monthly release is tagged `builds-YYYY-MM` and ships every successful
+build as a `<package>-<YYYYMMDD>-<HHMMSS>-<distro>.zip` asset.
 
 ## Layout
 
 ```
 adash/
+├── .github/workflows/
+│   └── pages.yml             Builds manifest + deploys to GitHub Pages
 ├── dashboard/
-│   ├── server.py         FastAPI app (UI + JSON + /pkg/{file}/recipe|log|manifest)
-│   ├── github_source.py  Releases REST scanner; emits dashboard/manifest.json
-│   ├── zip_reader.py     HTTP byte-range remote zip reader + in-memory LRU
-│   ├── manifest.json     Generated; do not edit
-│   └── static/           index.html · style.css · app.js
+│   ├── server.py             FastAPI app (local dev)
+│   ├── github_source.py      Releases REST scanner; emits manifest.json
+│   ├── zip_reader.py         HTTP byte-range remote zip reader (server-side)
+│   ├── manifest.json         Generated; do not edit
+│   └── static/               index.html, style.css, app.js
 ├── pyproject.toml
 ├── requirements.txt
 ├── LICENSE
 └── README.md
 ```
 
-## Run
+## Deploy to GitHub Pages
+
+One-time setup:
+
+1. Push this repository to GitHub.
+2. Open **Settings → Pages**.
+3. Under **Source**, pick **GitHub Actions** .
+4. Either push a commit to `main` or trigger the workflow manually.
+
+Once the workflow finishes, your site is live at
+`https://<user>.github.io/<repo>/`. The workflow re-runs every hour, so
+new releases show up without any manual action.
+
+In this mode the page detects there is no backend, loads
+`./manifest.json` directly, and lazy-loads
+[`@zip.js/zip.js`](https://github.com/gildas-lormeau/zip.js) the first
+time you open a recipe or log. The zip is read in your browser via
+range requests against
+`https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>` with
+`Accept: application/octet-stream`, so only the entry you actually open
+is downloaded.
+
+Heads-up: those API calls are unauthenticated and count against the
+60 requests/hour per-IP GitHub limit. Listing packages does not consume
+calls (it just reads the static `manifest.json`); opening recipes/logs
+does. For most personal use this is fine.
+
+## Run locally
 
 ```bash
 git clone <this-repo> adash && cd adash
@@ -41,12 +72,11 @@ uvicorn dashboard.server:app --host 0.0.0.0 --port 8765
 ```
 
 The first request to `/api/manifest` fetches the releases list from
-`api.github.com` and writes `dashboard/manifest.json`. The "⟳" button on
-the top bar forces a refresh; the in-process cache lives for
-`ATESOR_TTL_SECONDS` (default 10 minutes) so casual reloads don't hit
-GitHub.
+`api.github.com` and writes `dashboard/manifest.json`. The refresh
+button on the top bar forces a re-fetch; the in-process cache lives for
+`ATESOR_TTL_SECONDS` (default 10 minutes).
 
-Optional one-shot CLI (warm or rebuild the manifest from the shell):
+Rebuild the manifest from the shell without starting the server:
 
 ```bash
 python -m dashboard.github_source --owner akifejaz --repo atesor
@@ -60,11 +90,13 @@ All settings are optional environment variables.
 |---|---|---|
 | `ATESOR_GH_OWNER` | `akifejaz` | GitHub owner whose releases are surfaced |
 | `ATESOR_GH_REPO`  | `atesor`   | GitHub repo whose releases are surfaced |
-| `ATESOR_TTL_SECONDS` | `600` | Server-side manifest cache TTL |
-| `GITHUB_TOKEN` / `GH_TOKEN` | – | Raises GitHub rate limit (60→5000/hr) |
+| `ATESOR_TTL_SECONDS` | `600` | Server-side manifest cache TTL (local mode) |
+| `GITHUB_TOKEN` / `GH_TOKEN` | - | Raises GitHub rate limit (60 to 5000/hr) |
 
-When no token env var is set, the server falls back to
+When no token env var is set, the local server falls back to
 `gh auth token` so it transparently reuses an existing `gh` CLI login.
+The Pages workflow uses the action's built-in `GITHUB_TOKEN` so the
+manifest build always runs authenticated.
 
 ## How packages are discovered
 
@@ -75,7 +107,8 @@ When no token env var is set, the server falls back to
 
 For each asset the manifest carries: `name`, `distro`, `version`,
 `build_date`, `size_bytes`, `download_count`, `release_tag`,
-`release_url`, `download_url` (direct CDN URL), `log_url`, `recipe_url`.
+`release_url`, `download_url` (direct CDN URL), `asset_id` (used by the
+in-browser zip reader), `log_url`, `recipe_url`.
 
 ## How logs and recipes are served
 
@@ -89,13 +122,14 @@ agent_<pkg>.log
 <pkg>/...           (the ported source tree)
 ```
 
-When a user opens the **Recipe** or **logs** modal, the server uses
-`zip_reader.HTTPRangeReader` to open the remote zip with HTTP
-`Range:` byte requests and pull only the entry it needs (typically a
-few KB). Repeat views are served from an in-memory LRU
-(256 entries / 64 MB cap), so popular packages are effectively free.
+- **Local server:** `zip_reader.HTTPRangeReader` opens the remote zip
+  over HTTP `Range:` byte requests and pulls only the entry it needs
+  (typically a few KB). Repeat views are served from an in-memory LRU
+  (256 entries / 64 MB cap).
+- **GitHub Pages:** the same idea, but it happens in the browser via
+  `@zip.js/zip.js`. No backend involved.
 
-## Endpoints
+## Local-mode endpoints
 
 | Method | Path | Returns |
 |---|---|---|
@@ -106,25 +140,34 @@ few KB). Repeat views are served from an in-memory LRU
 | GET | `/pkg/{filename}/log?which=agent\|run&tail=N` | The matching log file |
 | GET | `/pkg/{filename}/manifest` | Per-package `manifest.json` from the zip |
 
+These exist only when you are running `uvicorn` locally. On GitHub
+Pages there is no backend; the page talks straight to GitHub.
+
 ## UI features
 
-* Release-tag selector (defaults to the newest month).
-* Distro filter with colored pills (alpine = blue, debian = red, ubuntu = orange).
-* Name search synced with the top-bar global search.
-* Sortable columns: Package · Distro · Version · Size · Downloads · Release · Built.
-* **Recipe** column with a dedicated `📋 recipe` button.
-* **Actions** column: green `⬇ download` (direct GitHub CDN link) + `logs` modal (Agent log · Build log · Manifest tabs).
-* Client-side pagination with 50 / 100 / 200 per page (persisted in `localStorage`).
-* Dark / light theme toggle (persisted).
-* `⟳` refresh button forces a fresh GitHub fetch.
+- Release-tag selector (defaults to the newest month).
+- Distro filter with colored pills.
+- Search box matches name, filename, version, distro, and release tag.
+  When the search box is non-empty it ignores the release/distro
+  dropdowns so matches in other releases still show up.
+- Sortable columns: Package, Distro, Version, Size, Downloads, Release, Built.
+- Recipe column with its own button.
+- Actions column: direct GitHub download link and a logs modal
+  (Agent log, Build log, Manifest tabs).
+- Client-side pagination (50 / 100 / 200 per page, persisted in `localStorage`).
+- Dark / light theme toggle (persisted).
 
 ## Failure handling
 
-* If GitHub is unreachable, the server falls back to the persisted
-  `dashboard/manifest.json` so the dashboard stays usable.
-* Endpoints return `502` with a useful detail when a zip cannot be read
+- Local mode: if GitHub is unreachable, the server falls back to the
+  persisted `dashboard/manifest.json` so the dashboard stays usable.
+  Endpoints return `502` with a useful detail when a zip cannot be read
   and `404` when an asset filename is unknown.
+- Pages mode: if `manifest.json` cannot be loaded, the table shows the
+  underlying fetch error. If a recipe/log fetch hits the GitHub rate
+  limit, the modal shows the API error message; waiting an hour or
+  setting up an authenticated mirror is the fix.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).
