@@ -26,12 +26,12 @@ const state = {
 const els = {
   body: document.getElementById("pkgBody"),
   filter: document.getElementById("filterInput"),
-  global: document.getElementById("globalSearch"),
   release: document.getElementById("releaseSelect"),
   distro: document.getElementById("distroSelect"),
   count: document.getElementById("resultCount"),
   meta: document.getElementById("manifestMeta"),
   refresh: document.getElementById("refreshBtn"),
+  requestPkg: document.getElementById("requestPkgBtn"),
   theme: document.getElementById("themeToggle"),
   modal: document.getElementById("modal"),
   modalTitle: document.getElementById("modalTitle"),
@@ -335,8 +335,7 @@ async function loadManifest() {
 
 // ---------- events ----------
 function syncSearch(v) { state.query = v; applyFiltersAndRender(true); }
-els.filter.addEventListener("input", e => { els.global.value = e.target.value; syncSearch(e.target.value); });
-els.global.addEventListener("input", e => { els.filter.value = e.target.value; syncSearch(e.target.value); });
+els.filter.addEventListener("input", e => syncSearch(e.target.value));
 els.release.addEventListener("change", e => { state.release = e.target.value; applyFiltersAndRender(true); });
 els.distro.addEventListener("change",  e => { state.distro  = e.target.value; applyFiltersAndRender(true); });
 
@@ -366,6 +365,25 @@ els.body.addEventListener("click", e => {
 els.modalClose.addEventListener("click", () => els.modal.classList.add("hidden"));
 els.modal.addEventListener("click", e => { if (e.target === els.modal) els.modal.classList.add("hidden"); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") els.modal.classList.add("hidden"); });
+
+// Open a prefilled "new issue" form on the atesor repo so users can request
+// a new package. GitHub renders the ``body`` query param as the initial
+// issue body — we ship a tiny template the user just fills in.
+(function wireRequestPkgButton() {
+  const body = [
+    "Package / Lib name : ",
+    "Public Repository Link : ",
+    "Platform : ",
+    "",
+  ].join("\n");
+  const params = new URLSearchParams({
+    title: "Package request: ",
+    labels: "package-request",
+    body,
+  });
+  els.requestPkg.href =
+    `https://github.com/akifejaz/atesor/issues/new?${params.toString()}`;
+})();
 
 els.refresh.addEventListener("click", async () => {
   if (state.mode === "static") {

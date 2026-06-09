@@ -65,23 +65,28 @@ a:hover { text-decoration: underline; }
   font-weight: 700;
 }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
-.topbar-right input {
-  width: 280px;
-  padding: 8px 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-}
-.topbar-right button {
+.topbar-right button,
+.topbar-right .topbar-link {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 12px;
   cursor: pointer;
+  font: inherit;
+  text-decoration: none;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
-.topbar-right button:hover { border-color: var(--accent); color: var(--accent-hover); }
+.topbar-right button:hover,
+.topbar-right .topbar-link:hover { border-color: var(--accent); color: var(--accent-hover); }
+.topbar-right .topbar-link.primary {
+  background: var(--accent, #2563eb);
+  border-color: var(--accent, #2563eb);
+  color: #fff;
+}
+.topbar-right .topbar-link.primary:hover { color: #fff; opacity: 0.9; }
 
 /* Main / controls -------------------------------------------- */
 main { max-width: 1400px; margin: 0 auto; padding: 24px 28px 80px; }
