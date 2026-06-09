@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>atesor-ai / pkgs</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260608c" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-logo">⬢</span>
+      <span class="brand-name">atesor-ai/<strong>pkgs</strong></span>
+    </div>
+    <div class="topbar-right">
+      <input id="globalSearch" type="search" placeholder="Search packages..." />
+      <button id="themeToggle" title="Toggle theme">☾</button>
+      <button id="refreshBtn" title="Rebuild manifest">⟳</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="controls">
+      <input id="filterInput" type="search" placeholder="Filter packages by name..." />
+      <select id="releaseSelect" title="Release tag"></select>
+      <select id="distroSelect" title="Distro">
+        <option value="">All distros</option>
+      </select>
+      <select id="pageSizeSelect" title="Packages per page">
+        <option value="50">50 / page</option>
+        <option value="100">100 / page</option>
+        <option value="200">200 / page</option>
+      </select>
+      <span id="resultCount" class="result-count"></span>
+    </section>
+
+    <section class="table-wrap">
+      <table id="pkgTable">
+        <thead>
+          <tr>
+            <th data-sort="name">Package</th>
+            <th data-sort="distro">Distro</th>
+            <th data-sort="version">Version</th>
+            <th data-sort="size_bytes">Size</th>
+            <th data-sort="download_count">Downloads</th>
+            <th data-sort="release_tag">Release</th>
+            <th data-sort="build_date">Built</th>
+            <th>Recipe</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="pkgBody">
+          <tr><td colspan="9" class="loading">Loading manifest…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <nav class="pager" id="pagerBottom"></nav>
+  </main>
+
+  <!-- Log / recipe viewer modal -->
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <span id="modalTitle">Viewer</span>
+        <div class="modal-tabs" id="modalTabs"></div>
+        <button id="modalClose" aria-label="Close">✕</button>
+      </div>
+      <pre id="modalBody" class="modal-body">Loading…</pre>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <span id="manifestMeta">—</span>
+  </footer>
+
+  <script src="/static/app.js?v=20260608d"></script>
+</body>
+</html>

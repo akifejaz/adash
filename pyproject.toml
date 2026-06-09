@@ -1,0 +1,25 @@
+[project]
+name = "atesor-dashboard"
+version = "0.1.0"
+description = "Web dashboard for browsing Atesor AI riscv64 package builds published on GitHub Releases."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Akif Ejaz", email = "akifejaz40@gmail.com" }]
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+]
+
+[project.urls]
+Homepage = "https://github.com/akifejaz/atesor"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["dashboard*"]
+
+[tool.setuptools.package-data]
+dashboard = ["static/*"]

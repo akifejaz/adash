@@ -1,0 +1,329 @@
+// Atesor AI dashboard — vanilla JS client (GitHub Releases source).
+
+const state = {
+  packages: [],
+  release: "",
+  distro: "",
+  query: "",
+  sortKey: "name",
+  sortDir: "asc",
+  page: 1,
+  pageSize: Number(localStorage.getItem("atesor-pagesize")) || 50,
+};
+
+const els = {
+  body: document.getElementById("pkgBody"),
+  filter: document.getElementById("filterInput"),
+  global: document.getElementById("globalSearch"),
+  release: document.getElementById("releaseSelect"),
+  distro: document.getElementById("distroSelect"),
+  count: document.getElementById("resultCount"),
+  meta: document.getElementById("manifestMeta"),
+  refresh: document.getElementById("refreshBtn"),
+  theme: document.getElementById("themeToggle"),
+  modal: document.getElementById("modal"),
+  modalTitle: document.getElementById("modalTitle"),
+  modalBody: document.getElementById("modalBody"),
+  modalTabs: document.getElementById("modalTabs"),
+  modalClose: document.getElementById("modalClose"),
+  pageSize: document.getElementById("pageSizeSelect"),
+  pagerBottom: document.getElementById("pagerBottom"),
+};
+
+const headers = document.querySelectorAll("thead th[data-sort]");
+const COLSPAN = 9;
+
+// ---------- formatting ----------
+function fmtSize(bytes) {
+  if (!bytes) return "0 B";
+  if (bytes < 1024) return bytes + " B";
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = bytes / 1024, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return v.toFixed(v < 10 ? 1 : 0) + " " + units[i];
+}
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toISOString().replace("T", " ").replace(/\..*Z$/, "Z");
+  } catch { return iso; }
+}
+
+function distroBadge(distro) {
+  const cls = `distro-pill distro-${distro}`;
+  return `<span class="${cls}">${escapeHtml(distro)}</span>`;
+}
+
+// ---------- rendering ----------
+function applyFiltersAndRender(resetPage = false) {
+  if (resetPage) state.page = 1;
+  const q = state.query.trim().toLowerCase();
+  const rows = state.packages.filter(p => {
+    if (state.release && p.release_tag !== state.release) return false;
+    if (state.distro && p.distro !== state.distro) return false;
+    if (q && !p.name.toLowerCase().includes(q) &&
+            !p.filename.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  const dir = state.sortDir === "asc" ? 1 : -1;
+  rows.sort((a, b) => {
+    const av = a[state.sortKey], bv = b[state.sortKey];
+    if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+    return String(av || "").localeCompare(String(bv || "")) * dir;
+  });
+
+  const total = rows.length;
+  const pageCount = Math.max(1, Math.ceil(total / state.pageSize));
+  if (state.page > pageCount) state.page = pageCount;
+  const start = (state.page - 1) * state.pageSize;
+  const pageRows = rows.slice(start, start + state.pageSize);
+
+  renderRows(pageRows);
+  renderPager(state.page, pageCount, total);
+
+  const shownStart = total === 0 ? 0 : start + 1;
+  const shownEnd = start + pageRows.length;
+  els.count.textContent = total === state.packages.length
+    ? `${shownStart}–${shownEnd} of ${total} packages`
+    : `${shownStart}–${shownEnd} of ${total} (filtered from ${state.packages.length})`;
+
+  headers.forEach(h => {
+    h.classList.toggle("sort-asc",  h.dataset.sort === state.sortKey && state.sortDir === "asc");
+    h.classList.toggle("sort-desc", h.dataset.sort === state.sortKey && state.sortDir === "desc");
+  });
+}
+
+// Build a compact 1 … 4 5 [6] 7 8 … N pager.
+function pageWindow(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const out = new Set([1, total, current - 1, current, current + 1]);
+  if (current <= 4) [2, 3, 4, 5].forEach(p => out.add(p));
+  if (current >= total - 3) [total - 4, total - 3, total - 2, total - 1].forEach(p => out.add(p));
+  const sorted = [...out].filter(p => p >= 1 && p <= total).sort((a, b) => a - b);
+  const result = [];
+  for (let i = 0; i < sorted.length; i++) {
+    if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.push("…");
+    result.push(sorted[i]);
+  }
+  return result;
+}
+
+function renderPager(current, pageCount, total) {
+  const render = (host) => {
+    host.replaceChildren();
+    if (total === 0 || pageCount <= 1) return;
+
+    const mk = (label, page, opts = {}) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.className = "page-btn" + (opts.active ? " active" : "");
+      b.disabled = !!opts.disabled;
+      if (page != null && !opts.disabled && !opts.active) {
+        b.addEventListener("click", () => goToPage(page));
+      }
+      return b;
+    };
+
+    host.appendChild(mk("‹ Prev", current - 1, { disabled: current === 1 }));
+    for (const p of pageWindow(current, pageCount)) {
+      if (p === "…") {
+        const span = document.createElement("span");
+        span.className = "page-ellipsis";
+        span.textContent = "…";
+        host.appendChild(span);
+      } else {
+        host.appendChild(mk(String(p), p, { active: p === current }));
+      }
+    }
+    host.appendChild(mk("Next ›", current + 1, { disabled: current === pageCount }));
+  };
+  render(els.pagerBottom);
+}
+
+function goToPage(p) {
+  state.page = p;
+  applyFiltersAndRender();
+  els.pagerBottom.scrollIntoView({ behavior: "smooth", block: "end" });
+}
+
+function renderRows(rows) {
+  if (rows.length === 0) {
+    els.body.innerHTML = `<tr><td colspan="${COLSPAN}" class="empty">No packages match your filters.</td></tr>`;
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  for (const p of rows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>
+        <div class="pkg-name">${escapeHtml(p.name)}</div>
+        <div class="pkg-file" title="${escapeHtml(p.filename)}">${escapeHtml(p.filename)}</div>
+      </td>
+      <td>${distroBadge(p.distro)}</td>
+      <td><span class="version-pill">${escapeHtml(p.version)}</span></td>
+      <td class="size-cell">${fmtSize(p.size_bytes)}</td>
+      <td class="num-cell">${p.download_count}</td>
+      <td><a class="release-link" href="${p.release_url}" target="_blank" rel="noopener">${escapeHtml(p.release_tag)}</a></td>
+      <td class="date-cell">${escapeHtml(fmtDate(p.build_date))}</td>
+      <td>
+        <button class="recipe-btn" data-action="recipe" data-filename="${escapeHtml(p.filename)}" data-name="${escapeHtml(p.name)}">📋 recipe</button>
+      </td>
+      <td class="actions">
+        <a class="download" href="${p.download_url}" title="Download from GitHub">⬇ download</a>
+        <button data-action="log" data-filename="${escapeHtml(p.filename)}" data-name="${escapeHtml(p.name)}">logs</button>
+      </td>`;
+    frag.appendChild(tr);
+  }
+  els.body.replaceChildren(frag);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+// ---------- modal ----------
+let modalContext = null;
+
+function openModal(title, tabs, initialTab = 0) {
+  modalContext = { tabs, active: initialTab };
+  els.modalTitle.textContent = title;
+  renderTabs();
+  els.modal.classList.remove("hidden");
+  loadActiveTab();
+}
+
+function openLogs(filename, name) {
+  const f = encodeURIComponent(filename);
+  openModal(name, [
+    { label: "Agent log", url: `/pkg/${f}/log?which=agent&tail=2000` },
+    { label: "Build log", url: `/pkg/${f}/log?which=run&tail=2000` },
+    { label: "Manifest",  url: `/pkg/${f}/manifest` },
+  ]);
+}
+
+function openRecipe(filename, name) {
+  const f = encodeURIComponent(filename);
+  openModal(name, [
+    { label: "Recipe", url: `/pkg/${f}/recipe` },
+  ]);
+}
+
+function renderTabs() {
+  els.modalTabs.replaceChildren(...modalContext.tabs.map((t, i) => {
+    const b = document.createElement("button");
+    b.textContent = t.label;
+    if (i === modalContext.active) b.classList.add("active");
+    b.onclick = () => { modalContext.active = i; renderTabs(); loadActiveTab(); };
+    return b;
+  }));
+}
+
+async function loadActiveTab() {
+  const t = modalContext.tabs[modalContext.active];
+  els.modalBody.textContent = "Loading from GitHub release zip…";
+  try {
+    const r = await fetch(t.url);
+    els.modalBody.textContent = r.ok
+      ? await r.text()
+      : `Failed (${r.status}): ${await r.text()}`;
+    els.modalBody.scrollTop = 0;
+  } catch (e) {
+    els.modalBody.textContent = `Error: ${e.message}`;
+  }
+}
+
+// ---------- bootstrap ----------
+async function loadManifest() {
+  els.body.innerHTML = `<tr><td colspan="${COLSPAN}" class="loading">Loading from GitHub Releases…</td></tr>`;
+  try {
+    const r = await fetch("/api/manifest");
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+    const m = await r.json();
+    state.packages = m.packages || [];
+
+    els.release.replaceChildren(...[
+      new Option("All releases", ""),
+      ...(m.releases || []).map(t => new Option(t, t)),
+    ]);
+    if (m.latest_release && (m.releases || []).includes(m.latest_release)) {
+      els.release.value = m.latest_release;
+      state.release = m.latest_release;
+    }
+
+    els.distro.replaceChildren(
+      new Option("All distros", ""),
+      ...(m.distros || []).map(d => new Option(d, d)),
+    );
+
+    const src = m.source ? `${m.source.owner}/${m.source.repo}` : "github";
+    els.meta.textContent = `${m.package_count} packages from ${src} • refreshed ${fmtDate(m.generated_at)}`;
+    applyFiltersAndRender();
+  } catch (e) {
+    els.body.innerHTML = `<tr><td colspan="${COLSPAN}" class="empty">Failed to load: ${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+// ---------- events ----------
+function syncSearch(v) { state.query = v; applyFiltersAndRender(true); }
+els.filter.addEventListener("input", e => { els.global.value = e.target.value; syncSearch(e.target.value); });
+els.global.addEventListener("input", e => { els.filter.value = e.target.value; syncSearch(e.target.value); });
+els.release.addEventListener("change", e => { state.release = e.target.value; applyFiltersAndRender(true); });
+els.distro.addEventListener("change",  e => { state.distro  = e.target.value; applyFiltersAndRender(true); });
+
+els.pageSize.value = String(state.pageSize);
+els.pageSize.addEventListener("change", e => {
+  state.pageSize = Number(e.target.value);
+  localStorage.setItem("atesor-pagesize", String(state.pageSize));
+  applyFiltersAndRender(true);
+});
+
+headers.forEach(h => h.addEventListener("click", () => {
+  const k = h.dataset.sort;
+  if (state.sortKey === k) state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+  else { state.sortKey = k; state.sortDir = "asc"; }
+  applyFiltersAndRender(true);
+}));
+
+els.body.addEventListener("click", e => {
+  const btn = e.target.closest("button[data-action]");
+  if (!btn) return;
+  const filename = btn.dataset.filename;
+  const name = btn.dataset.name;
+  if (btn.dataset.action === "recipe") openRecipe(filename, name);
+  else if (btn.dataset.action === "log") openLogs(filename, name);
+});
+
+els.modalClose.addEventListener("click", () => els.modal.classList.add("hidden"));
+els.modal.addEventListener("click", e => { if (e.target === els.modal) els.modal.classList.add("hidden"); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") els.modal.classList.add("hidden"); });
+
+els.refresh.addEventListener("click", async () => {
+  els.refresh.disabled = true;
+  const orig = els.refresh.textContent;
+  els.refresh.textContent = "…";
+  try {
+    const r = await fetch("/api/refresh", { method: "POST" });
+    if (!r.ok) alert(`Refresh failed: ${r.status} ${await r.text()}`);
+    await loadManifest();
+  } finally {
+    els.refresh.disabled = false;
+    els.refresh.textContent = orig;
+  }
+});
+
+els.theme.addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("atesor-theme", next);
+  els.theme.textContent = next === "light" ? "☀" : "☾";
+});
+
+const saved = localStorage.getItem("atesor-theme") || "dark";
+document.documentElement.dataset.theme = saved;
+els.theme.textContent = saved === "light" ? "☀" : "☾";
+
+loadManifest();
