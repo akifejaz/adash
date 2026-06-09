@@ -64,6 +64,7 @@ class PackageEntry:
     download_url: str
     download_count: int
     filename: str
+    asset_id: int = 0
     log_url: str | None = None
     recipe_url: str | None = None
     categories: list[str] = field(default_factory=list)
@@ -196,6 +197,7 @@ def build_manifest(owner: str, repo: str, token: str | None = None) -> dict[str,
                     download_url=asset.get("browser_download_url", ""),
                     download_count=int(asset.get("download_count", 0) or 0),
                     filename=asset_name,
+                    asset_id=int(asset.get("id", 0) or 0),
                     log_url=f"/pkg/{asset_name}/log",
                     recipe_url=f"/pkg/{asset_name}/recipe",
                     categories=[distro],

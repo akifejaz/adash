@@ -1,0 +1,66 @@
+name: Deploy dashboard to GitHub Pages
+
+# Build a static copy of the dashboard:
+#   • generates manifest.json from the GitHub Releases API
+#   • copies dashboard/static/{index.html,app.js,style.css} alongside it
+#   • deploys the bundle to GitHub Pages via the official Pages action
+#
+# In static mode the SPA reads recipe / log / per-package manifest entries
+# directly from each release zip in the browser using HTTP Range requests,
+# so no backend is required.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Refresh hourly so newly published releases appear without a manual push.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Assemble site/
+        env:
+          # Authenticated calls get 5000/hr instead of 60/hr — important
+          # because every browser visit also costs API calls.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p site/static
+          cp dashboard/static/index.html site/index.html
+          cp dashboard/static/app.js     site/static/app.js
+          cp dashboard/static/style.css  site/static/style.css
+          python -m dashboard.github_source --output site/manifest.json
+          # Disable Jekyll so files starting with _ (none today, but cheap insurance) are served.
+          touch site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
