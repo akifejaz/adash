@@ -63,6 +63,7 @@ cmd_build() {
 
 cmd_static() {
   [[ -f "$SITE_DIR/manifest.json" ]] || cmd_build
+  copy_ui
   local port="$STATIC_PORT"
   # If the chosen port is busy (e.g. a previous run was left over), walk
   # forward until we find a free one rather than crashing.
