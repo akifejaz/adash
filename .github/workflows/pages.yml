@@ -38,8 +38,9 @@ jobs:
 
       - name: Assemble site/
         env:
-          # Authenticated calls get 5000/hr instead of 60/hr — important
-          # because every browser visit also costs API calls.
+          # Authenticated calls get 5000/hr instead of 60/hr — needed both
+          # for the manifest scan and for pulling each release zip's
+          # recipe/log entries at build time.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -48,6 +49,10 @@ jobs:
           cp dashboard/static/app.js     site/static/app.js
           cp dashboard/static/style.css  site/static/style.css
           python -m dashboard.github_source --output site/manifest.json
+          # Pre-extract recipe.md / log-agent.txt / log-run.txt / manifest.json
+          # for every package so the static SPA can fetch them without ever
+          # touching the GitHub assets API at view time (CORS blocks that).
+          python -m dashboard.build_static --manifest site/manifest.json --out site
           # Disable Jekyll so files starting with _ (none today, but cheap insurance) are served.
           touch site/.nojekyll
 

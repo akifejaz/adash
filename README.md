@@ -6,11 +6,13 @@ A small web dashboard for browsing and downloading every package that
 It can run two ways:
 
 - **Hosted on GitHub Pages** as a fully static site. A GitHub Actions
-  workflow regenerates the manifest on a schedule, and the page reads
-  recipes and logs straight out of each release zip in your browser
-  using HTTP range requests. No server to run.
+  workflow regenerates the manifest on a schedule and, for every
+  package, pre-extracts the recipe, the agent log, the build log, and
+  the in-zip manifest from each release zip and writes them as plain
+  files alongside the SPA. The browser just fetches those files - no
+  backend, no API calls at view time, no CORS surprises.
 - **As a local FastAPI app** for development. Same UI, but the manifest
-  and zip reads happen on the Python side.
+  and zip reads happen on the Python side, on demand.
 
 The source of truth in both cases is GitHub Releases on
 [`akifejaz/atesor`](https://github.com/akifejaz/atesor/releases). Each
@@ -26,7 +28,8 @@ adash/
 ├── dashboard/
 │   ├── server.py             FastAPI app (local dev)
 │   ├── github_source.py      Releases REST scanner; emits manifest.json
-│   ├── zip_reader.py         HTTP byte-range remote zip reader (server-side)
+│   ├── build_static.py       Pre-extracts recipe/log/manifest per package for Pages
+│   ├── zip_reader.py         HTTP byte-range remote zip reader
 │   ├── manifest.json         Generated; do not edit
 │   └── static/               index.html, style.css, app.js
 ├── pyproject.toml
@@ -48,19 +51,23 @@ Once the workflow finishes, your site is live at
 `https://<user>.github.io/<repo>/`. The workflow re-runs every hour, so
 new releases show up without any manual action.
 
-In this mode the page detects there is no backend, loads
-`./manifest.json` directly, and lazy-loads
-[`@zip.js/zip.js`](https://github.com/gildas-lormeau/zip.js) the first
-time you open a recipe or log. The zip is read in your browser via
-range requests against
-`https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>` with
-`Accept: application/octet-stream`, so only the entry you actually open
-is downloaded.
+In this mode the page detects there is no backend and loads
+`./manifest.json` directly. Recipe and log modals just fetch
+pre-extracted files at `./pkg/<asset-filename>/recipe.md`,
+`log-agent.txt`, `log-run.txt`, and `manifest.json`.
 
-Heads-up: those API calls are unauthenticated and count against the
-60 requests/hour per-IP GitHub limit. Listing packages does not consume
-calls (it just reads the static `manifest.json`); opening recipes/logs
-does. For most personal use this is fine.
+Why pre-extract? Reading entries from a release zip in the browser
+sounds nice, but GitHub's asset endpoint redirects to
+`objects.githubusercontent.com`, which does not send CORS headers, so
+the browser refuses the response with `Failed to fetch`. Doing the zip
+reading at build time (where Python can follow redirects freely) sides
+steps that entirely.
+
+Build cost: extracting recipe, two logs, and the in-zip manifest for
+~300 packages takes a few minutes inside the Action and adds a few
+tens of megabytes to the site. Logs are tailed to the last 2000 lines
+to keep size reasonable. The workflow uses the action's built-in
+`GITHUB_TOKEN`, so all GitHub API calls are authenticated.
 
 ## Run locally
 
@@ -126,8 +133,10 @@ agent_<pkg>.log
   over HTTP `Range:` byte requests and pulls only the entry it needs
   (typically a few KB). Repeat views are served from an in-memory LRU
   (256 entries / 64 MB cap).
-- **GitHub Pages:** the same idea, but it happens in the browser via
-  `@zip.js/zip.js`. No backend involved.
+- **GitHub Pages:** `dashboard/build_static.py` does the same range
+  reads at build time, once per zip, and writes the extracted entries
+  into `site/pkg/<filename>/`. The SPA just fetches those static files
+  at view time.
 
 ## Local-mode endpoints
 
@@ -164,9 +173,10 @@ Pages there is no backend; the page talks straight to GitHub.
   Endpoints return `502` with a useful detail when a zip cannot be read
   and `404` when an asset filename is unknown.
 - Pages mode: if `manifest.json` cannot be loaded, the table shows the
-  underlying fetch error. If a recipe/log fetch hits the GitHub rate
-  limit, the modal shows the API error message; waiting an hour or
-  setting up an authenticated mirror is the fix.
+  underlying fetch error. If a package's release zip could not be
+  opened at build time, its recipe/log files contain a short
+  `(failed to open release zip: ...)` placeholder rather than a 404,
+  so the modal still works.
 
 ## License
 

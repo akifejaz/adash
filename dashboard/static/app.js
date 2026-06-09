@@ -220,11 +220,11 @@ function openModal(title, tabs, initialTab = 0) {
 
 function openLogs(filename, name) {
   if (state.mode === "static") {
-    const pkg = packageByFilename(filename);
+    const f = encodeURIComponent(filename);
     openModal(name, [
-      { label: "Agent log", load: () => zipText(pkg, [`agent_${pkg.name}.log`, `${pkg.name}.log`], { tail: 2000 }) },
-      { label: "Build log", load: () => zipText(pkg, [`${pkg.name}.log`, `agent_${pkg.name}.log`], { tail: 2000 }) },
-      { label: "Manifest",  load: () => zipText(pkg, ["manifest.json"]) },
+      { label: "Agent log", url: `./pkg/${f}/log-agent.txt` },
+      { label: "Build log", url: `./pkg/${f}/log-run.txt` },
+      { label: "Manifest",  url: `./pkg/${f}/manifest.json` },
     ]);
     return;
   }
@@ -238,9 +238,9 @@ function openLogs(filename, name) {
 
 function openRecipe(filename, name) {
   if (state.mode === "static") {
-    const pkg = packageByFilename(filename);
+    const f = encodeURIComponent(filename);
     openModal(name, [
-      { label: "Recipe", load: () => zipText(pkg, ["build_recipe.md", "BUILD_RECIPE.md", "recipe.md"]) },
+      { label: "Recipe", url: `./pkg/${f}/recipe.md` },
     ]);
     return;
   }
@@ -262,18 +262,12 @@ function renderTabs() {
 
 async function loadActiveTab() {
   const t = modalContext.tabs[modalContext.active];
-  els.modalBody.textContent = state.mode === "static"
-    ? "Reading from release zip… (streaming over HTTP Range)"
-    : "Loading from GitHub release zip…";
+  els.modalBody.textContent = "Loading…";
   try {
-    let body;
-    if (t.load) {
-      body = await t.load();
-    } else {
-      const r = await fetch(t.url);
-      body = r.ok ? await r.text() : `Failed (${r.status}): ${await r.text()}`;
-    }
-    els.modalBody.textContent = body ?? "(empty)";
+    const r = await fetch(t.url);
+    els.modalBody.textContent = r.ok
+      ? await r.text()
+      : `Failed (${r.status}): ${await r.text()}`;
     els.modalBody.scrollTop = 0;
   } catch (e) {
     els.modalBody.textContent = `Error: ${e.message || e}`;
@@ -281,53 +275,6 @@ async function loadActiveTab() {
 }
 
 // ---------- bootstrap ----------
-function packageByFilename(filename) {
-  return state.packages.find(p => p.filename === filename);
-}
-
-// Lazy-load zip.js only when a recipe/log modal is opened in static mode.
-let _zipjsPromise = null;
-function loadZipJs() {
-  if (!_zipjsPromise) {
-    _zipjsPromise = import("https://cdn.jsdelivr.net/npm/@zip.js/zip.js@2.7.45/index.js");
-  }
-  return _zipjsPromise;
-}
-
-// Read a UTF-8 text entry out of a remote release zip using HTTP Range
-// requests. ``candidates`` is an ordered list of preferred entry names; the
-// first one that exists in the zip wins. Set ``tail`` to keep only the last
-// N lines of the result (used for logs).
-async function zipText(pkg, candidates, { tail = 0 } = {}) {
-  if (!pkg || !pkg.asset_id) {
-    throw new Error("Package metadata is missing asset_id (rebuild manifest).");
-  }
-  const { ZipReader, HttpReader, TextWriter } = await loadZipJs();
-  const url = `https://api.github.com/repos/${state.source.owner}/${state.source.repo}/releases/assets/${pkg.asset_id}`;
-  const httpReader = new HttpReader(url, {
-    useRangeHeader: true,
-    forceRangeRequests: true,
-    headers: [["Accept", "application/octet-stream"]],
-  });
-  const reader = new ZipReader(httpReader);
-  try {
-    const entries = await reader.getEntries();
-    const byName = new Map(entries.map(e => [e.filename, e]));
-    let entry = null;
-    for (const name of candidates) {
-      if (byName.has(name)) { entry = byName.get(name); break; }
-    }
-    if (!entry) {
-      throw new Error(`None of [${candidates.join(", ")}] found inside ${pkg.filename}`);
-    }
-    let text = await entry.getData(new TextWriter());
-    if (tail > 0) text = text.split(/\r?\n/).slice(-tail).join("\n");
-    return text;
-  } finally {
-    await reader.close();
-  }
-}
-
 // Probe for a static ./manifest.json sibling of index.html. If found, we run
 // in pure-static mode (GitHub Pages). Otherwise we use the FastAPI backend.
 async function detectStaticManifest() {
