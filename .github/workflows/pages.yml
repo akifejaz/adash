@@ -13,8 +13,9 @@ on:
   push:
     branches: [main]
   schedule:
-    # Refresh hourly so newly published releases appear without a manual push.
-    - cron: "17 * * * *"
+    # Weekly "release refresh" so newly published GitHub Releases appear
+    # without a manual push. Saturday 17:00 UTC = Sat 22:00 PKT (UTC+5).
+    - cron: "0 17 * * 6"
   workflow_dispatch:
 
 permissions:
